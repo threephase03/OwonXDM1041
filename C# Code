@@ -1,0 +1,144 @@
+using System;
+using System.IO.Ports;
+using System.Timers;
+using System.Windows;
+
+namespace OwonXDM1041
+{
+    public partial class MainWindow : Window
+    {
+        private SerialPort _serialPort;
+        private Timer _timer;
+        private double _measuredValue;
+        private object gauge;
+
+        public MainWindow()
+        {
+            InitializeComponent();
+            LoadComPorts();
+            StartTimerButton.IsEnabled = false;
+
+
+        }
+
+        // Load available COM ports into the ComboBox
+        private void LoadComPorts()
+        {
+            string[] ports = SerialPort.GetPortNames();
+            ComPortComboBox.ItemsSource = ports;
+            if (ports.Length > 0)
+                ComPortComboBox.SelectedIndex = 0; // Default to first port
+        }
+
+        // Open selected COM port and send the SCPI command to configure AC voltage measurement
+        private void OpenPortButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (ComPortComboBox.SelectedItem == null)
+            {
+                MessageBox.Show("Please select a COM port.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            string selectedPort = ComPortComboBox.SelectedItem.ToString();
+
+            try
+            {
+                // Open the serial port
+                _serialPort = new SerialPort(selectedPort, 115200, Parity.None, 8, StopBits.One);
+                _serialPort.Open();
+
+                // Send the SCPI command to configure AC voltage measurement
+                string setupCommand = "CONF:VOLT:AC AUTO\n"; // Example SCPI command
+                _serialPort.WriteLine(setupCommand);
+
+                MessageBox.Show($"Port {selectedPort} opened and AC voltage setup command sent.",
+                                "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+
+                StartTimerButton.IsEnabled = true;
+
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to open port: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        // Start the timer when the Start Timer button is clicked
+        private void StartTimerButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_serialPort == null || !_serialPort.IsOpen)
+            {
+                MessageBox.Show("Please open the COM port first.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            // Initialize the timer to call the Measurement method every 1 second (1000 ms)
+            _timer = new Timer(1000);
+            _timer.Elapsed += OnTimedEvent;
+            _timer.Start();
+
+            StartTimerButton.IsEnabled = false;
+            OpenPortButton.IsEnabled = false; 
+
+            MessageBox.Show("Timer started. The measurements will be updated every second.", "Timer Started", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        // Timer event handler that sends the SCPI command and updates the gauge
+        private void OnTimedEvent(object sender, ElapsedEventArgs e)
+        {
+            try
+            {
+                // Send the MEAS1? command to request the AC voltage measurement
+                _serialPort.WriteLine("MEAS1?");
+
+                // Read the response from the device (assuming it returns a numeric value)
+                string response = _serialPort.ReadLine().Trim();
+
+                if (double.TryParse(response, out _measuredValue))
+                {
+                    // Update the gauge with the new measurement value
+                    Dispatcher.Invoke(() =>
+                    {
+                        // Ensure gauge is of correct type and update its value
+                        if (Gauge != null)
+                        {
+                            Gauge.Value = _measuredValue; // This assumes the gauge is named "Gauge"
+                        }
+                    });
+                }
+
+                
+            }
+            catch (Exception ex)
+            {
+                Dispatcher.Invoke(() =>
+                {
+                   // MessageBox.Show($"Error during measurement: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                });
+            }
+        }
+
+        private void StopTimer()
+        {
+            if (_timer != null && _timer.Enabled)
+            {
+                _timer.Stop();
+                _timer.Dispose();  // Optionally dispose of the timer if no longer needed
+                MessageBox.Show("Timer stopped.", "Timer Stopped", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+
+        private void StopTimerButton_Click(object sender, RoutedEventArgs e)
+        {
+            StopTimer();
+            StartTimerButton.IsEnabled = true;
+            OpenPortButton.IsEnabled = true;
+            _serialPort.Close();
+
+
+        }
+
+
+    }
+}
+
